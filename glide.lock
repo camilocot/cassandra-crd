@@ -1,0 +1,6 @@
+hash: 83d0fa814733093e284d778129b31b692822007080d9eae38029541d75c10968
+updated: 2018-04-21T21:32:02.074390398+08:00
+imports:
+- name: k8s.io/code-generator
+  version: c7a364cb8cf12ce4704f017c0a403c55db3e752b
+testImports: []

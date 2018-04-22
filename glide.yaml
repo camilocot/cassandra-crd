@@ -1,0 +1,3 @@
+package: github.com/camilocot/cassandra-crd
+import:
+- package: k8s.io/code-generator
