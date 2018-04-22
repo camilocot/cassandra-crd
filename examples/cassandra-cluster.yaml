@@ -1,0 +1,7 @@
+apiVersion: cassandra.databases.camilocot/v1alpha1
+kind: CassandraCluster
+metadata:
+  name: cassandracluster
+spec:
+  deploymentName: cassandracluster
+  replicas: 1

@@ -9,3 +9,21 @@ for a Cassandra instance, such as:
 - Decommission a C* instance
 - Bootstrap a C* instance
 - Configuring authentication
+
+## Running
+
+**Prerequisite**: Since the sample-controller uses `apps/v1` deployments, the Kubernetes cluster version should be greater than 1.9.
+
+```sh
+# assumes you have a working kubeconfig, not required if operating in-cluster
+$ go run *.go -kubeconfig=$HOME/.kube/local -logtostderr=true
+
+# create a CustomResourceDefinition
+$ kubectl create -f examples/crd.yaml
+
+# create a custom resource of type CassandraCluster
+$ kubectl create -f examples/cassandra-cluster.yaml
+
+# check deployments created through the custom resource
+$ kubectl get deployments
+```

@@ -19,7 +19,7 @@ limitations under the License.
 package versioned
 
 import (
-	cassandracontrollerv1alpha1 "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned/typed/cassandracontroller/v1alpha1"
+	cassandrav1alpha1 "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned/typed/cassandra/v1alpha1"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"
@@ -27,27 +27,27 @@ import (
 
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
-	CassandracontrollerV1alpha1() cassandracontrollerv1alpha1.CassandracontrollerV1alpha1Interface
+	CassandraV1alpha1() cassandrav1alpha1.CassandraV1alpha1Interface
 	// Deprecated: please explicitly pick a version if possible.
-	Cassandracontroller() cassandracontrollerv1alpha1.CassandracontrollerV1alpha1Interface
+	Cassandra() cassandrav1alpha1.CassandraV1alpha1Interface
 }
 
 // Clientset contains the clients for groups. Each group has exactly one
 // version included in a Clientset.
 type Clientset struct {
 	*discovery.DiscoveryClient
-	cassandracontrollerV1alpha1 *cassandracontrollerv1alpha1.CassandracontrollerV1alpha1Client
+	cassandraV1alpha1 *cassandrav1alpha1.CassandraV1alpha1Client
 }
 
-// CassandracontrollerV1alpha1 retrieves the CassandracontrollerV1alpha1Client
-func (c *Clientset) CassandracontrollerV1alpha1() cassandracontrollerv1alpha1.CassandracontrollerV1alpha1Interface {
-	return c.cassandracontrollerV1alpha1
+// CassandraV1alpha1 retrieves the CassandraV1alpha1Client
+func (c *Clientset) CassandraV1alpha1() cassandrav1alpha1.CassandraV1alpha1Interface {
+	return c.cassandraV1alpha1
 }
 
-// Deprecated: Cassandracontroller retrieves the default version of CassandracontrollerClient.
+// Deprecated: Cassandra retrieves the default version of CassandraClient.
 // Please explicitly pick a version.
-func (c *Clientset) Cassandracontroller() cassandracontrollerv1alpha1.CassandracontrollerV1alpha1Interface {
-	return c.cassandracontrollerV1alpha1
+func (c *Clientset) Cassandra() cassandrav1alpha1.CassandraV1alpha1Interface {
+	return c.cassandraV1alpha1
 }
 
 // Discovery retrieves the DiscoveryClient
@@ -66,7 +66,7 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 	}
 	var cs Clientset
 	var err error
-	cs.cassandracontrollerV1alpha1, err = cassandracontrollerv1alpha1.NewForConfig(&configShallowCopy)
+	cs.cassandraV1alpha1, err = cassandrav1alpha1.NewForConfig(&configShallowCopy)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func NewForConfig(c *rest.Config) (*Clientset, error) {
 // panics if there is an error in the config.
 func NewForConfigOrDie(c *rest.Config) *Clientset {
 	var cs Clientset
-	cs.cassandracontrollerV1alpha1 = cassandracontrollerv1alpha1.NewForConfigOrDie(c)
+	cs.cassandraV1alpha1 = cassandrav1alpha1.NewForConfigOrDie(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClientForConfigOrDie(c)
 	return &cs
@@ -91,7 +91,7 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 // New creates a new Clientset for the given RESTClient.
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
-	cs.cassandracontrollerV1alpha1 = cassandracontrollerv1alpha1.New(c)
+	cs.cassandraV1alpha1 = cassandrav1alpha1.New(c)
 
 	cs.DiscoveryClient = discovery.NewDiscoveryClient(c)
 	return &cs

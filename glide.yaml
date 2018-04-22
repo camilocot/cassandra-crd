@@ -1,3 +1,6 @@
 package: github.com/camilocot/cassandra-crd
 import:
 - package: k8s.io/code-generator
+- package: k8s.io/api
+  subpackages:
+  - apps/v1
