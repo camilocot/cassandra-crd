@@ -3,5 +3,5 @@ kind: CassandraCluster
 metadata:
   name: cassandracluster
 spec:
-  deploymentName: cassandracluster
-  replicas: 1
+  statefulsetName: cassandracluster
+  replicas: 2

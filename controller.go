@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	kubeinformers "k8s.io/client-go/informers"
@@ -50,11 +51,11 @@ const (
 	// SuccessSynced is used as part of the Event 'reason' when a CassandraCluster is synced
 	SuccessSynced = "Synced"
 	// ErrResourceExists is used as part of the Event 'reason' when a CassandraCluster fails
-	// to sync due to a Deployment of the same name already existing.
+	// to sync due to a StatefulSet of the same name already existing.
 	ErrResourceExists = "ErrResourceExists"
 
 	// MessageResourceExists is the message used for Events when a resource
-	// fails to sync due to a Deployment already existing
+	// fails to sync due to a StatefulSet already existing
 	MessageResourceExists = "Resource %q already exists and is not managed by CassandraCluster"
 	// MessageResourceSynced is the message used for an Event fired when a CassandraCluster
 	// is synced successfully
@@ -68,8 +69,8 @@ type Controller struct {
 	// cassandraclientset is a clientset for our own API group
 	cassandraclientset clientset.Interface
 
-	deploymentsLister       appslisters.DeploymentLister
-	deploymentsSynced       cache.InformerSynced
+	statefulsetsLister      appslisters.StatefulSetLister
+	statefulsetsSynced      cache.InformerSynced
 	cassandraclustersLister listers.CassandraClusterLister
 	cassandraclustersSynced cache.InformerSynced
 
@@ -91,9 +92,9 @@ func NewController(
 	kubeInformerFactory kubeinformers.SharedInformerFactory,
 	cassandraInformerFactory informers.SharedInformerFactory) *Controller {
 
-	// obtain references to shared index informers for the Deployment and CassandraCluster
+	// obtain references to shared index informers for the StatefulSet and CassandraCluster
 	// types.
-	deploymentInformer := kubeInformerFactory.Apps().V1().Deployments()
+	statefulsetInformer := kubeInformerFactory.Apps().V1().StatefulSets()
 	cassandraclusterInformer := cassandraInformerFactory.Cassandra().V1alpha1().CassandraClusters()
 
 	// Create event broadcaster
@@ -109,8 +110,8 @@ func NewController(
 	controller := &Controller{
 		kubeclientset:           kubeclientset,
 		cassandraclientset:      cassandraclientset,
-		deploymentsLister:       deploymentInformer.Lister(),
-		deploymentsSynced:       deploymentInformer.Informer().HasSynced,
+		statefulsetsLister:      statefulsetInformer.Lister(),
+		statefulsetsSynced:      statefulsetInformer.Informer().HasSynced,
 		cassandraclustersLister: cassandraclusterInformer.Lister(),
 		cassandraclustersSynced: cassandraclusterInformer.Informer().HasSynced,
 		workqueue:               workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "CassandraClusters"),
@@ -125,20 +126,20 @@ func NewController(
 			controller.enqueueCassandraCluster(new)
 		},
 	})
-	// Set up an event handler for when Deployment resources change. This
-	// handler will lookup the owner of the given Deployment, and if it is
+	// Set up an event handler for when StatefulSet resources change. This
+	// handler will lookup the owner of the given StatefulSet, and if it is
 	// owned by a CassandraCluster resource will enqueue that CassandraCluster resource for
 	// processing. This way, we don't need to implement custom logic for
-	// handling Deployment resources. More info on this pattern:
+	// handling StatefulSet resources. More info on this pattern:
 	// https://github.com/kubernetes/community/blob/8cafef897a22026d42f5e5bb3f104febe7e29830/contributors/devel/controllers.md
-	deploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	statefulsetInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: controller.handleObject,
 		UpdateFunc: func(old, new interface{}) {
-			newDepl := new.(*appsv1.Deployment)
-			oldDepl := old.(*appsv1.Deployment)
-			if newDepl.ResourceVersion == oldDepl.ResourceVersion {
-				// Periodic resync will send update events for all known Deployments.
-				// Two different versions of the same Deployment will always have different RVs.
+			newStSet := new.(*appsv1.StatefulSet)
+			oldStSet := old.(*appsv1.StatefulSet)
+			if newStSet.ResourceVersion == oldStSet.ResourceVersion {
+				// Periodic resync will send update events for all known StatefulSets.
+				// Two different versions of the same StatefulSet will always have different RVs.
 				return
 			}
 			controller.handleObject(new)
@@ -162,7 +163,7 @@ func (c *Controller) Run(threadiness int, stopCh <-chan struct{}) error {
 
 	// Wait for the caches to be synced before starting workers
 	glog.Info("Waiting for informer caches to sync")
-	if ok := cache.WaitForCacheSync(stopCh, c.deploymentsSynced, c.cassandraclustersSynced); !ok {
+	if ok := cache.WaitForCacheSync(stopCh, c.statefulsetsSynced, c.cassandraclustersSynced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
@@ -264,20 +265,39 @@ func (c *Controller) syncHandler(key string) error {
 		return err
 	}
 
-	deploymentName := cassandracluster.Spec.DeploymentName
-	if deploymentName == "" {
+	statefulsetName := cassandracluster.Spec.StatefulSetName
+	if statefulsetName == "" {
 		// We choose to absorb the error here as the worker would requeue the
 		// resource otherwise. Instead, the next time the resource is updated
 		// the resource will be queued again.
-		runtime.HandleError(fmt.Errorf("%s: deployment name must be specified", key))
+		runtime.HandleError(fmt.Errorf("%s: statefulset name must be specified", key))
 		return nil
 	}
 
-	// Get the deployment with the name specified in CassandraCluster.spec
-	deployment, err := c.deploymentsLister.Deployments(cassandracluster.Namespace).Get(deploymentName)
+	// Get the headless service with the name specified in CassandraCluster.spec
+	_, err = c.kubeclientset.CoreV1().Services(cassandracluster.Namespace).Get(statefulsetName+"-unready", metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		_, err = c.kubeclientset.CoreV1().Services(cassandracluster.Namespace).Create(newHeadLessServiceUnready(cassandracluster))
+	}
+
+	if err != nil {
+		return err
+	}
+	// Get the headless service with the name specified in CassandraCluster.spec
+	_, err = c.kubeclientset.CoreV1().Services(cassandracluster.Namespace).Get(statefulsetName, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		_, err = c.kubeclientset.CoreV1().Services(cassandracluster.Namespace).Create(newHeadLessService(cassandracluster))
+	}
+
+	if err != nil {
+		return err
+	}
+
+	// Get the statefulset with the name specified in CassandraCluster.spec
+	statefulset, err := c.statefulsetsLister.StatefulSets(cassandracluster.Namespace).Get(statefulsetName)
 	// If the resource doesn't exist, we'll create it
 	if errors.IsNotFound(err) {
-		deployment, err = c.kubeclientset.AppsV1().Deployments(cassandracluster.Namespace).Create(newDeployment(cassandracluster))
+		statefulset, err = c.kubeclientset.AppsV1().StatefulSets(cassandracluster.Namespace).Create(newStatefulSet(cassandracluster))
 	}
 
 	// If an error occurs during Get/Create, we'll requeue the item so we can
@@ -287,20 +307,20 @@ func (c *Controller) syncHandler(key string) error {
 		return err
 	}
 
-	// If the Deployment is not controlled by this CassandraCluster resource, we should log
+	// If the StatefulSet is not controlled by this CassandraCluster resource, we should log
 	// a warning to the event recorder and ret
-	if !metav1.IsControlledBy(deployment, cassandracluster) {
-		msg := fmt.Sprintf(MessageResourceExists, deployment.Name)
+	if !metav1.IsControlledBy(statefulset, cassandracluster) {
+		msg := fmt.Sprintf(MessageResourceExists, statefulset.Name)
 		c.recorder.Event(cassandracluster, corev1.EventTypeWarning, ErrResourceExists, msg)
 		return fmt.Errorf(msg)
 	}
 
 	// If this number of the replicas on the CassandraCluster resource is specified, and the
-	// number does not equal the current desired replicas on the Deployment, we
-	// should update the Deployment resource.
-	if cassandracluster.Spec.Replicas != nil && *cassandracluster.Spec.Replicas != *deployment.Spec.Replicas {
-		glog.V(4).Infof("CassandraCluster %s replicas: %d, deployment replicas: %d", name, *cassandracluster.Spec.Replicas, *deployment.Spec.Replicas)
-		deployment, err = c.kubeclientset.AppsV1().Deployments(cassandracluster.Namespace).Update(newDeployment(cassandracluster))
+	// number does not equal the current desired replicas on the StatefulSet, we
+	// should update the StatefulSet resource.
+	if cassandracluster.Spec.Replicas != nil && *cassandracluster.Spec.Replicas != *statefulset.Spec.Replicas {
+		glog.V(4).Infof("CassandraCluster %s replicas: %d, statefulset replicas: %d", name, *cassandracluster.Spec.Replicas, *statefulset.Spec.Replicas)
+		statefulset, err = c.kubeclientset.AppsV1().StatefulSets(cassandracluster.Namespace).Update(newStatefulSet(cassandracluster))
 	}
 
 	// If an error occurs during Update, we'll requeue the item so we can
@@ -312,7 +332,7 @@ func (c *Controller) syncHandler(key string) error {
 
 	// Finally, we update the status block of the CassandraCluster resource to reflect the
 	// current state of the world
-	err = c.updateCassandraClusterStatus(cassandracluster, deployment)
+	err = c.updateCassandraClusterStatus(cassandracluster, statefulset)
 	if err != nil {
 		return err
 	}
@@ -321,12 +341,12 @@ func (c *Controller) syncHandler(key string) error {
 	return nil
 }
 
-func (c *Controller) updateCassandraClusterStatus(cassandracluster *cassandraapi.CassandraCluster, deployment *appsv1.Deployment) error {
+func (c *Controller) updateCassandraClusterStatus(cassandracluster *cassandraapi.CassandraCluster, statefulset *appsv1.StatefulSet) error {
 	// NEVER modify objects from the store. It's a read-only, local cache.
 	// You can use DeepCopy() to make a deep copy of original object and modify this copy
 	// Or create a copy manually for better performance
 	cassandraclusterCopy := cassandracluster.DeepCopy()
-	cassandraclusterCopy.Status.AvailableReplicas = deployment.Status.AvailableReplicas
+	cassandraclusterCopy.Status.CurrentReplicas = statefulset.Status.CurrentReplicas
 	// If the CustomResourceSubresources feature gate is not enabled,
 	// we must use Update instead of UpdateStatus to update the Status block of the CassandraCluster resource.
 	// UpdateStatus will not allow changes to the Spec of the resource,
@@ -388,17 +408,17 @@ func (c *Controller) handleObject(obj interface{}) {
 	}
 }
 
-// newDeployment creates a new Deployment for a CassandraCluster resource. It also sets
+// newStatefulSet creates a new StatefulSet for a CassandraCluster resource. It also sets
 // the appropriate OwnerReferences on the resource so handleObject can discover
 // the CassandraCluster resource that 'owns' it.
-func newDeployment(cassandracluster *cassandraapi.CassandraCluster) *appsv1.Deployment {
+func newStatefulSet(cassandracluster *cassandraapi.CassandraCluster) *appsv1.StatefulSet {
 	labels := map[string]string{
 		"app":        "cassandra",
 		"controller": cassandracluster.Name,
 	}
-	return &appsv1.Deployment{
+	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      cassandracluster.Spec.DeploymentName,
+			Name:      cassandracluster.Spec.StatefulSetName,
 			Namespace: cassandracluster.Namespace,
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(cassandracluster, schema.GroupVersionKind{
@@ -408,8 +428,9 @@ func newDeployment(cassandracluster *cassandraapi.CassandraCluster) *appsv1.Depl
 				}),
 			},
 		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: cassandracluster.Spec.Replicas,
+		Spec: appsv1.StatefulSetSpec{
+			ServiceName: cassandracluster.Spec.StatefulSetName + "-unready",
+			Replicas:    cassandracluster.Spec.Replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: labels,
 			},
@@ -421,11 +442,143 @@ func newDeployment(cassandracluster *cassandraapi.CassandraCluster) *appsv1.Depl
 					Containers: []corev1.Container{
 						{
 							Name:  "cassandra",
-							Image: "cassandra:latest",
+							Image: "gcr.io/google-samples/cassandra:v13",
+							Env: []corev1.EnvVar{
+								{
+									Name:  "CASSANDRA_SEEDS",
+									Value: cassandracluster.Spec.StatefulSetName + "-0." + cassandracluster.Spec.StatefulSetName + "-unready." + cassandracluster.Namespace + ".svc.cluster.local",
+								},
+								{
+									Name:  "MAX_HEAP_SIZE",
+									Value: "512M",
+								},
+								{
+									Name:  "HEAP_NEWSIZE",
+									Value: "100M",
+								},
+								{
+									Name: "POD_IP",
+									ValueFrom: &corev1.EnvVarSource{
+										FieldRef: &corev1.ObjectFieldSelector{
+											FieldPath: "status.podIP",
+										},
+									},
+								},
+							},
+							Ports: []corev1.ContainerPort{
+								{
+									Name:          "cql",
+									ContainerPort: 9042,
+								},
+								{
+									Name:          "intra-node",
+									ContainerPort: 7001,
+								},
+								{
+									Name:          "jmx",
+									ContainerPort: 7099,
+								},
+							},
+							SecurityContext: &corev1.SecurityContext{
+								Capabilities: &corev1.Capabilities{
+									Add: []corev1.Capability{"IPC_LOCK"},
+								},
+							},
+							ReadinessProbe: &corev1.Probe{
+								Handler: corev1.Handler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"/bin/bash", "-c", "/ready-probe.sh"},
+									},
+								},
+								InitialDelaySeconds: 15,
+								TimeoutSeconds:      5,
+							},
+							Lifecycle: &corev1.Lifecycle{
+								PreStop: &corev1.Handler{
+									Exec: &corev1.ExecAction{
+										Command: []string{"/bin/sh", "-c", "nodetool", "drain"},
+									},
+								},
+							},
 						},
 					},
 				},
 			},
+		},
+	}
+}
+
+func newHeadLessServiceUnready(cassandracluster *cassandraapi.CassandraCluster) *corev1.Service {
+	labels := map[string]string{
+		"app":        "cassandra",
+		"controller": cassandracluster.Name,
+	}
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cassandracluster.Spec.StatefulSetName + "-unready",
+			Labels:    labels,
+			Namespace: cassandracluster.Namespace,
+			// it will return IPs even of the unready pods. Bootstraping a new cluster need it
+			Annotations: map[string]string{
+				"service.alpha.kubernetes.io/tolerate-unready-endpoints": "true",
+			},
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(cassandracluster, schema.GroupVersionKind{
+					Group:   cassandraapi.SchemeGroupVersion.Group,
+					Version: cassandraapi.SchemeGroupVersion.Version,
+					Kind:    "CassandraCluster",
+				}),
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "cql",
+					Port:       9042,
+					TargetPort: intstr.FromInt(9042),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+			Selector:  labels,
+			ClusterIP: "None",
+			Type:      corev1.ServiceTypeClusterIP,
+		},
+	}
+}
+
+// newHeadLessService creates a new headless Service for a CassandraCluster resource. It also sets
+// the appropriate OwnerReferences on the resource so handleObject can discover
+// the CassandraCluster resource that 'owns' it.
+func newHeadLessService(cassandracluster *cassandraapi.CassandraCluster) *corev1.Service {
+	labels := map[string]string{
+		"app":        "cassandra",
+		"controller": cassandracluster.Name,
+	}
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cassandracluster.Spec.StatefulSetName,
+			Labels:    labels,
+			Namespace: cassandracluster.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(cassandracluster, schema.GroupVersionKind{
+					Group:   cassandraapi.SchemeGroupVersion.Group,
+					Version: cassandraapi.SchemeGroupVersion.Version,
+					Kind:    "CassandraCluster",
+				}),
+			},
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{
+					Name:       "cql",
+					Port:       9042,
+					TargetPort: intstr.FromInt(9042),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
+			Selector:  labels,
+			ClusterIP: "None",
+			Type:      corev1.ServiceTypeClusterIP,
 		},
 	}
 }

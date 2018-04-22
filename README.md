@@ -12,7 +12,7 @@ for a Cassandra instance, such as:
 
 ## Running
 
-**Prerequisite**: Since the sample-controller uses `apps/v1` deployments, the Kubernetes cluster version should be greater than 1.9.
+**Prerequisite**: Since the sample-controller uses `apps/v1` statefulset, the Kubernetes cluster version should be greater than 1.9.
 
 ```sh
 # assumes you have a working kubeconfig, not required if operating in-cluster
@@ -24,6 +24,6 @@ $ kubectl create -f examples/crd.yaml
 # create a custom resource of type CassandraCluster
 $ kubectl create -f examples/cassandra-cluster.yaml
 
-# check deployments created through the custom resource
-$ kubectl get deployments
+# check statefulset created through the custom resource
+$ kubectl get statefulset
 ```

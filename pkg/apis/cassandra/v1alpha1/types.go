@@ -34,13 +34,13 @@ type CassandraCluster struct {
 
 // CassandraClusterSpec is the spec for a CassandraCluster resource
 type CassandraClusterSpec struct {
-	DeploymentName string `json:"deploymentName"`
-	Replicas       *int32 `json:"replicas"`
+	StatefulSetName string `json:"statefulsetName"`
+	Replicas        *int32 `json:"replicas"`
 }
 
 // CassandraClusterStatus is the status for a CassandraCluster resource
 type CassandraClusterStatus struct {
-	AvailableReplicas int32 `json:"availableReplicas"`
+	CurrentReplicas int32 `json:"currentReplicas"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
