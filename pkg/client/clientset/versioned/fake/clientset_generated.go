@@ -20,8 +20,8 @@ package fake
 
 import (
 	clientset "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned"
-	cassandracontrollerv1alpha1 "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned/typed/cassandracontroller/v1alpha1"
-	fakecassandracontrollerv1alpha1 "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned/typed/cassandracontroller/v1alpha1/fake"
+	cassandrav1alpha1 "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned/typed/cassandra/v1alpha1"
+	fakecassandrav1alpha1 "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned/typed/cassandra/v1alpha1/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
@@ -71,12 +71,12 @@ func (c *Clientset) Discovery() discovery.DiscoveryInterface {
 
 var _ clientset.Interface = &Clientset{}
 
-// CassandracontrollerV1alpha1 retrieves the CassandracontrollerV1alpha1Client
-func (c *Clientset) CassandracontrollerV1alpha1() cassandracontrollerv1alpha1.CassandracontrollerV1alpha1Interface {
-	return &fakecassandracontrollerv1alpha1.FakeCassandracontrollerV1alpha1{Fake: &c.Fake}
+// CassandraV1alpha1 retrieves the CassandraV1alpha1Client
+func (c *Clientset) CassandraV1alpha1() cassandrav1alpha1.CassandraV1alpha1Interface {
+	return &fakecassandrav1alpha1.FakeCassandraV1alpha1{Fake: &c.Fake}
 }
 
-// Cassandracontroller retrieves the CassandracontrollerV1alpha1Client
-func (c *Clientset) Cassandracontroller() cassandracontrollerv1alpha1.CassandracontrollerV1alpha1Interface {
-	return &fakecassandracontrollerv1alpha1.FakeCassandracontrollerV1alpha1{Fake: &c.Fake}
+// Cassandra retrieves the CassandraV1alpha1Client
+func (c *Clientset) Cassandra() cassandrav1alpha1.CassandraV1alpha1Interface {
+	return &fakecassandrav1alpha1.FakeCassandraV1alpha1{Fake: &c.Fake}
 }
