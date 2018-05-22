@@ -29,6 +29,7 @@ import (
 
 	clientset "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned"
 	informers "github.com/camilocot/cassandra-crd/pkg/client/informers/externalversions"
+	"github.com/camilocot/cassandra-crd/pkg/controller"
 	"github.com/camilocot/cassandra-crd/pkg/signals"
 )
 
@@ -61,7 +62,7 @@ func main() {
 	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
 	exampleInformerFactory := informers.NewSharedInformerFactory(exampleClient, time.Second*30)
 
-	controller := NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory)
+	controller := controller.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory)
 
 	go kubeInformerFactory.Start(stopCh)
 	go exampleInformerFactory.Start(stopCh)
