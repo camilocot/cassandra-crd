@@ -15,8 +15,11 @@ for a Cassandra instance, such as:
 **Prerequisite**: Since the sample-controller uses `apps/v1` statefulset, the Kubernetes cluster version should be greater than 1.9.
 
 ```sh
+# Build cassandra-crd
+$ hack/build/build.sh
+
 # assumes you have a working kubeconfig, not required if operating in-cluster
-$ go run *.go -kubeconfig=$HOME/.kube/local -logtostderr=true
+$ _output/bin/cassandra-crd -kubeconfig=$HOME/.kube/local -logtostderr=true
 
 # create a CustomResourceDefinition
 $ kubectl create -f examples/crd.yaml
