@@ -18,6 +18,7 @@ import (
 	cassandracli "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned"
 	"github.com/camilocot/cassandra-crd/pkg/log"
 	"github.com/camilocot/cassandra-crd/pkg/operator"
+	"github.com/camilocot/cassandra-crd/pkg/operator/service/k8s"
 )
 
 // Main is the main program.
@@ -47,8 +48,11 @@ func (m *Main) Run(stopC <-chan struct{}) error {
 		return err
 	}
 
+	// Create kubernetes service.
+	k8sservice := k8s.New(k8sCli, m.logger)
+
 	// Create the operator and run
-	op, err := operator.New(m.config, ptCli, crdCli, k8sCli, m.logger)
+	op, err := operator.New(m.config, ptCli, k8sservice, crdCli, k8sCli, m.logger)
 	if err != nil {
 		return err
 	}
