@@ -1,78 +1,129 @@
-/*
-Copyright 2017 The Kubernetes Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package main
 
 import (
-	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/golang/glog"
-	kubeinformers "k8s.io/client-go/informers"
+	"github.com/spotahome/kooper/client/crd"
+	applogger "github.com/spotahome/kooper/log"
+	apiextensionscli "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/client-go/kubernetes"
+	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	// Uncomment the following line to load the gcp plugin (only required to authenticate against GKE clusters).
-	// _ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 
-	clientset "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned"
-	informers "github.com/camilocot/cassandra-crd/pkg/client/informers/externalversions"
-	"github.com/camilocot/cassandra-crd/pkg/controller"
-	"github.com/camilocot/cassandra-crd/pkg/signals"
+	cassandracli "github.com/camilocot/cassandra-crd/pkg/client/clientset/versioned"
+	"github.com/camilocot/cassandra-crd/pkg/log"
+	"github.com/camilocot/cassandra-crd/pkg/operator"
+	"github.com/camilocot/cassandra-crd/pkg/operator/service/k8s"
 )
 
-var (
-	masterURL  string
-	kubeconfig string
-)
+// Main is the main program.
+type Main struct {
+	flags  *Flags
+	config operator.Config
+	logger log.Logger
+}
 
-func main() {
-	flag.Parse()
-
-	// set up signals so we handle the first shutdown signal gracefully
-	stopCh := signals.SetupSignalHandler()
-
-	cfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
-	if err != nil {
-		glog.Fatalf("Error building kubeconfig: %s", err.Error())
-	}
-
-	kubeClient, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		glog.Fatalf("Error building kubernetes clientset: %s", err.Error())
-	}
-
-	exampleClient, err := clientset.NewForConfig(cfg)
-	if err != nil {
-		glog.Fatalf("Error building example clientset: %s", err.Error())
-	}
-
-	kubeInformerFactory := kubeinformers.NewSharedInformerFactory(kubeClient, time.Second*30)
-	exampleInformerFactory := informers.NewSharedInformerFactory(exampleClient, time.Second*30)
-
-	controller := controller.NewController(kubeClient, exampleClient, kubeInformerFactory, exampleInformerFactory)
-
-	go kubeInformerFactory.Start(stopCh)
-	go exampleInformerFactory.Start(stopCh)
-
-	if err = controller.Run(2, stopCh); err != nil {
-		glog.Fatalf("Error running controller: %s", err.Error())
+// New returns the main application.
+func New(logger log.Logger) *Main {
+	f := NewFlags()
+	return &Main{
+		flags:  f,
+		config: f.OperatorConfig(),
+		logger: logger,
 	}
 }
 
-func init() {
-	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
-	flag.StringVar(&masterURL, "master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
+// Run runs the app.
+func (m *Main) Run(stopC <-chan struct{}) error {
+	m.logger.Infof("initializing pod termination operator")
+
+	// Get kubernetes rest client.
+	ptCli, crdCli, k8sCli, err := m.getKubernetesClients()
+	if err != nil {
+		return err
+	}
+
+	// Create kubernetes service.
+	k8sservice := k8s.New(k8sCli, m.logger)
+
+	// Create the operator and run
+	op, err := operator.New(m.config, ptCli, k8sservice, crdCli, k8sCli, m.logger)
+	if err != nil {
+		return err
+	}
+
+	return op.Run(stopC)
+}
+
+// getKubernetesClients returns all the required clients to communicate with
+// kubernetes cluster: CRD type client, pod terminator types client, kubernetes core types client.
+func (m *Main) getKubernetesClients() (cassandracli.Interface, crd.Interface, kubernetes.Interface, error) {
+	var err error
+	var cfg *rest.Config
+
+	// If devel mode then use configuration flag path.
+	if m.flags.Development {
+		cfg, err = clientcmd.BuildConfigFromFlags("", m.flags.KubeConfig)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("could not load configuration: %s", err)
+		}
+	} else {
+		cfg, err = rest.InClusterConfig()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("error loading kubernetes configuration inside cluster, check app is running outside kubernetes cluster or run in development mode: %s", err)
+		}
+	}
+
+	// Create clients.
+	k8sCli, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// App CRD k8s types client.
+	ccCli, err := cassandracli.NewForConfig(cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// CRD cli.
+	aexCli, err := apiextensionscli.NewForConfig(cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	crdCli := crd.NewClient(aexCli, m.logger)
+
+	return ccCli, crdCli, k8sCli, nil
+}
+
+func main() {
+	logger := &applogger.Std{}
+
+	stopC := make(chan struct{})
+	finishC := make(chan error)
+	signalC := make(chan os.Signal, 1)
+	signal.Notify(signalC, syscall.SIGTERM, syscall.SIGINT)
+	m := New(logger)
+
+	// Run in background the operator.
+	go func() {
+		finishC <- m.Run(stopC)
+	}()
+
+	select {
+	case err := <-finishC:
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error running operator: %s", err)
+			os.Exit(1)
+		}
+	case <-signalC:
+		logger.Infof("Signal captured, exiting...")
+	}
+	close(stopC)
+	time.Sleep(5 * time.Second)
 }
